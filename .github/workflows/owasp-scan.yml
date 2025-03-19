@@ -1,0 +1,83 @@
+name: OWASP Scan (Long-running)
+
+on:
+  workflow_dispatch:
+
+jobs:
+  run-scan:
+    runs-on: ubuntu-latest
+    timeout-minutes: 150  # overall timeout
+
+    steps:
+      - name: Trigger OWASP Scan
+        id: trigger
+        run: |
+          RESPONSE=$(curl -X POST "http://34.135.194.57:28291/OWASP/start_scan" \
+            -H "Content-Type: application/json" \
+            -d '{
+              "options": {
+                "categories": ["Jailbreak", "OWASP1", "OWASP2", "OWASP3", "OWASP4", "OWASP5", "OWASP6", "OWASP7", "OWASP8", "OWASP9", "OWASP10"],
+                "quality_level": 0,
+                "response_details_level": 0,
+                "languages": "en",
+                "attack_type": [0],
+                "repeat_count": 1,
+                "risk_categories": [],
+                "custom_risk": null,
+                "owasp_version": "2024"
+              },
+              "template": {"prefix": "", "postfix": "", "config_name": null},
+              "restrictions": {
+                "total_limit": null,
+                "attack_type_limit": [null, null, null, null],
+                "delete_duplicates": false
+              },
+              "model": {
+                "provider": "Preconfigured models",
+                "model_name": "echo",
+                "model_type": "local",
+                "custom_host": "",
+                "api_key": ""
+              },
+              "files": {},
+              "debug": true
+            }')
+          echo "Response: $RESPONSE"
+          SCAN_ID=$(echo "$RESPONSE" | jq -r '.scan_id')
+          echo "scan_id=$SCAN_ID" >> $GITHUB_OUTPUT
+
+      - name: Wait until scan completes (2 hours max)
+        timeout-minutes: 130  # Максимум чуть больше 2 часов
+        run: |
+          SCAN_ID="${{ steps.trigger.outputs.scan_id }}"
+          for i in {1..260}; do  # apx 260 times with 30 sec interval (~2 hrs)
+            STATUS=$(curl -s "http://34.135.194.57:28291/OWASP/scan/status/${SCAN_ID}" | jq -r '.status')
+            TIMESTAMP=$(date '+%H:%M:%S')
+            echo "[$TIMESTAMP] Poll #$i: status=$STATUS"
+
+            if [[ "$STATUS" == "completed" ]]; then
+              echo "Scan completed successfully!"
+              exit 0
+            elif [[ "$STATUS" == "failed" ]]; then
+              echo "Scan failed!"
+              exit 1
+            fi
+
+            sleep 30  # 30 секунд между проверками
+          done
+
+          echo "Timeout reached (2 hrs)"
+          exit 1
+
+      - name: Download Excel Report
+        run: |
+          SCAN_ID="${{ steps.trigger.outputs.scan_id }}"
+          REPORT_FILE="${SCAN_ID}.xlsx"
+          curl -o "${REPORT_FILE}" "http://34.135.194.57:28291/OWASP/reports/${REPORT_FILE}"
+          echo "✅ Report downloaded: ${REPORT_FILE}"
+
+      - name: Save Excel Report as Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: OWASP-Scan-Excel-Report
+          path: '*.xlsx'
