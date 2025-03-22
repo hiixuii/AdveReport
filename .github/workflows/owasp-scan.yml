@@ -74,15 +74,14 @@ jobs:
           echo "⏰ Timeout after 2 hours!"
           exit 1
 
-      - name: Download Excel Report and Verify
+      - name: Download Excel Report and Verify (Simple)
         if: env.REPORT_FILE != ''
         env:
           REPORT_FILE: ${{ env.REPORT_FILE }}
         run: |
           REPORT_FILE_PATH=$(basename "${REPORT_FILE}")
-          curl -fSL -o "${REPORT_FILE_PATH}" "http://34.135.194.57:28291/reports/${REPORT_FILE}"
+          curl -fSL -o "${REPORT_FILE_PATH}" "${REPORT_FILE}"
           
-          # Проверяем, что файл реально Excel
           if file "${REPORT_FILE_PATH}" | grep -qE 'Microsoft Excel|Composite Document|Spreadsheet'; then
             echo "✅ Report downloaded and verified: ${REPORT_FILE_PATH}"
             echo "REPORT_FILE_PATH=${REPORT_FILE_PATH}" >> $GITHUB_ENV
