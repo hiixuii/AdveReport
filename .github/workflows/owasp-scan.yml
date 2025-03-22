@@ -1,20 +1,103 @@
-- name: Download Excel Report and Verify
-  if: env.REPORT_FILE != ''
-  env:
-    REPORT_FILE: ${{ env.REPORT_FILE }}
-  run: |
-    REPORT_FILE_PATH=$(basename "${REPORT_FILE}")
-    curl -fSL -o "${REPORT_FILE_PATH}" "http://34.135.194.57:28291/reports/${REPORT_FILE}"
-    
-    # Проверяем, что файл реально Excel
-    if file "${REPORT_FILE_PATH}" | grep -qE 'Microsoft Excel|Composite Document|Spreadsheet'; then
-      echo "✅ Report downloaded and verified: ${REPORT_FILE_PATH}"
-      echo "REPORT_FILE_PATH=${REPORT_FILE_PATH}" >> $GITHUB_ENV
-    else
-      echo "❌ Downloaded file is NOT a valid Excel file"
-      echo "File type:"
-      file "${REPORT_FILE_PATH}"
-      echo "File contents (first lines):"
-      head -n 20 "${REPORT_FILE_PATH}"
-      exit 1
-    fi
+name: OWASP Scan Workflow (Robust & Verified)
+
+on:
+  workflow_dispatch:
+
+jobs:
+  run-scan:
+    runs-on: ubuntu-latest
+    timeout-minutes: 150
+
+    steps:
+      - name: Trigger OWASP Scan
+        id: trigger
+        run: |
+          RESPONSE=$(curl -X POST "http://34.135.194.57:28291/start_scan" \
+            -H "Content-Type: application/json" \
+            -d '{
+              "options": {
+                "categories": ["Jailbreak", "OWASP1", "OWASP2", "OWASP3", "OWASP4", "OWASP5", "OWASP6", "OWASP7", "OWASP8", "OWASP9", "OWASP10"],
+                "quality_level": 0,
+                "response_details_level": 0,
+                "languages": "en",
+                "attack_type": [0],
+                "repeat_count": 1,
+                "risk_categories": [],
+                "custom_risk": null,
+                "owasp_version": "2024"
+              },
+              "template": {"prefix": "", "postfix": "", "config_name": null},
+              "restrictions": {
+                "total_limit": null,
+                "attack_type_limit": [null, null, null, null],
+                "delete_duplicates": false
+              },
+              "model": {
+                "provider": "Preconfigured models",
+                "model_name": "echo",
+                "model_type": "local",
+                "custom_host": "",
+                "api_key": ""
+              },
+              "files": {},
+              "debug": true
+            }')
+          echo "Response: $RESPONSE"
+          SCAN_ID=$(echo "$RESPONSE" | jq -r '.id')
+          echo "SCAN_ID=$SCAN_ID" >> $GITHUB_ENV
+
+      - name: Wait until scan completes (2 hours max)
+        timeout-minutes: 130
+        run: |
+          for i in {1..260}; do
+            STATUS_RESPONSE=$(curl -s "http://34.135.194.57:28291/check_task" \
+              -H "Content-Type: application/json" \
+              -d "{\"id\": \"${SCAN_ID}\"}")
+
+            STATUS=$(echo "$STATUS_RESPONSE" | jq -r '.status')
+            TIMESTAMP=$(date '+%H:%M:%S')
+            echo "[$TIMESTAMP] Poll #$i: status=$STATUS"
+
+            if [[ "$STATUS" == "Done" ]]; then
+              FILE_NAME=$(echo "$STATUS_RESPONSE" | jq -r '.Result')
+              echo "✅ Scan completed! Report file: $FILE_NAME"
+              echo "REPORT_FILE=$FILE_NAME" >> $GITHUB_ENV
+              exit 0
+            elif [[ "$STATUS" == "Error" ]]; then
+              echo "❌ Scan returned Error status!"
+              exit 1
+            fi
+
+            sleep 30
+          done
+
+          echo "⏰ Timeout after 2 hours!"
+          exit 1
+
+      - name: Download Excel Report and Verify
+        if: env.REPORT_FILE != ''
+        env:
+          REPORT_FILE: ${{ env.REPORT_FILE }}
+        run: |
+          REPORT_FILE_PATH=$(basename "${REPORT_FILE}")
+          curl -fSL -o "${REPORT_FILE_PATH}" "http://34.135.194.57:28291/reports/${REPORT_FILE}"
+          
+          # Проверяем, что файл реально Excel
+          if file "${REPORT_FILE_PATH}" | grep -qE 'Microsoft Excel|Composite Document|Spreadsheet'; then
+            echo "✅ Report downloaded and verified: ${REPORT_FILE_PATH}"
+            echo "REPORT_FILE_PATH=${REPORT_FILE_PATH}" >> $GITHUB_ENV
+          else
+            echo "❌ Downloaded file is NOT a valid Excel file"
+            echo "File type:"
+            file "${REPORT_FILE_PATH}"
+            echo "File contents (first lines):"
+            head -n 20 "${REPORT_FILE_PATH}"
+            exit 1
+          fi
+
+      - name: Save Excel Report as Artifact
+        if: env.REPORT_FILE_PATH != ''
+        uses: actions/upload-artifact@v4
+        with:
+          name: OWASP-Scan-Excel-Report
+          path: '*.xlsx'
