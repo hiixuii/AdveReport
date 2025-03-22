@@ -60,11 +60,11 @@ jobs:
 
             if [[ "$STATUS" == "Done" ]]; then
               FILE_NAME=$(echo "$STATUS_RESPONSE" | jq -r '.Result')
-              echo "Scan completed! Report file: $FILE_NAME"
+              echo "✅ Scan completed! Report file: $FILE_NAME"
               echo "REPORT_FILE=$FILE_NAME" >> $GITHUB_ENV
               exit 0
             elif [[ "$STATUS" == "Error" ]]; then
-              echo "Scan returned Error status!"
+              echo "❌ Scan returned Error status!"
               exit 1
             fi
 
@@ -78,7 +78,7 @@ jobs:
         if: env.REPORT_FILE != ''
         run: |
           curl -o "${REPORT_FILE}" "http://34.135.194.57:28291/reports/${REPORT_FILE}"
-          echo "Report downloaded: ${REPORT_FILE}"
+          echo "✅ Report downloaded: ${REPORT_FILE}"
 
       - name: Save Excel Report as Artifact
         if: env.REPORT_FILE != ''
