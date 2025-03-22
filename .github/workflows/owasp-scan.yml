@@ -1,4 +1,4 @@
-name: OWASP Scan Workflow (Fixed)
+name: OWASP Scan Workflow (Corrected)
 
 on:
   workflow_dispatch:
@@ -43,13 +43,12 @@ jobs:
               "debug": true
             }')
           echo "Response: $RESPONSE"
-          SCAN_ID=$(echo "$RESPONSE" | jq -r '.scan_id')
-          echo "scan_id=$SCAN_ID" >> $GITHUB_OUTPUT
+          SCAN_ID=$(echo "$RESPONSE" | jq -r '.id')
+          echo "SCAN_ID=$SCAN_ID" >> $GITHUB_ENV
 
       - name: Wait until scan completes (2 hours max)
         timeout-minutes: 130
         run: |
-          SCAN_ID="${{ steps.trigger.outputs.scan_id }}"
           for i in {1..260}; do
             STATUS_RESPONSE=$(curl -s "http://34.135.194.57:28291/check_task" \
               -H "Content-Type: application/json" \
@@ -62,23 +61,27 @@ jobs:
             if [[ "$STATUS" == "Done" ]]; then
               FILE_NAME=$(echo "$STATUS_RESPONSE" | jq -r '.Result')
               echo "Scan completed! Report file: $FILE_NAME"
-              echo "report_file=$FILE_NAME" >> $GITHUB_ENV
+              echo "REPORT_FILE=$FILE_NAME" >> $GITHUB_ENV
               exit 0
+            elif [[ "$STATUS" == "Error" ]]; then
+              echo "Scan returned Error status!"
+              exit 1
             fi
 
             sleep 30
           done
 
-          echo "Timeout after 2 hours!"
+          echo "⏰ Timeout after 2 hours!"
           exit 1
 
       - name: Download Excel Report
+        if: env.REPORT_FILE != ''
         run: |
-          REPORT_FILE="${{ env.report_file }}"
           curl -o "${REPORT_FILE}" "http://34.135.194.57:28291/reports/${REPORT_FILE}"
           echo "Report downloaded: ${REPORT_FILE}"
 
       - name: Save Excel Report as Artifact
+        if: env.REPORT_FILE != ''
         uses: actions/upload-artifact@v4
         with:
           name: OWASP-Scan-Excel-Report
