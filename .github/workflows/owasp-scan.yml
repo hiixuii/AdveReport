@@ -77,20 +77,22 @@ jobs:
       - name: Download Excel Report
         if: env.REPORT_FILE != ''
         run: |
-          curl -o "${REPORT_FILE}" "http://34.135.194.57:28291/reports/${REPORT_FILE}"
+          REPORT_FILE_PATH=$(basename "${REPORT_FILE}")
+          curl -o "${REPORT_FILE_PATH}" "http://34.135.194.57:28291/reports/${REPORT_FILE}"
           # Verify the downloaded file is actually an Excel file
-          if file "${REPORT_FILE}" | grep -q "Microsoft Excel"; then
-            echo "✅ Report downloaded and verified: ${REPORT_FILE}"
+          if file "${REPORT_FILE_PATH}" | grep -q "Microsoft Excel"; then
+            echo "✅ Report downloaded and verified: ${REPORT_FILE_PATH}"
+            echo "REPORT_FILE_PATH=${REPORT_FILE_PATH}" >> $GITHUB_ENV
           else
             echo "❌ Downloaded file is not a valid Excel file"
             echo "File contents:"
-            cat "${REPORT_FILE}"
+            cat "${REPORT_FILE_PATH}"
             exit 1
           fi
 
       - name: Save Excel Report as Artifact
-        if: env.REPORT_FILE != '' && success()
+        if: env.REPORT_FILE_PATH != '' && success()
         uses: actions/upload-artifact@v4
         with:
           name: OWASP-Scan-Excel-Report
-          path: '*.xlsx'
+          path: ${{ env.REPORT_FILE_PATH }}
