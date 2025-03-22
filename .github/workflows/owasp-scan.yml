@@ -101,3 +101,8 @@ jobs:
         with:
           name: OWASP-Scan-Excel-Report
           path: '*.xlsx'
+      - name: Generate Allure JSON from Excel
+        env:
+          REPORT_FILE_PATH: ${{ env.REPORT_FILE_PATH }}
+        run: |
+          python generate_allure_results.py
