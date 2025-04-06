@@ -9,6 +9,9 @@ jobs:
     timeout-minutes: 150
 
     steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+
       - name: Trigger OWASP Scan
         id: trigger
         run: |
@@ -76,21 +79,17 @@ jobs:
 
       - name: Download Excel Report
         if: env.REPORT_FILE != ''
-        env:
-          REPORT_FILE: ${{ env.REPORT_FILE }}
         run: |
           REPORT_FILE_PATH=$(basename "${REPORT_FILE}")
           FULL_URL="http://34.135.194.57:28291/download-file/${REPORT_FILE}"
           curl -fSL -o "${REPORT_FILE_PATH}" "${FULL_URL}"
-            
+
           if file "${REPORT_FILE_PATH}" | grep -qE 'Microsoft Excel|Composite Document|Spreadsheet'; then
             echo "✅ Report downloaded and verified: ${REPORT_FILE_PATH}"
             echo "REPORT_FILE_PATH=${REPORT_FILE_PATH}" >> $GITHUB_ENV
           else
             echo "❌ Downloaded file is NOT a valid Excel file"
-            echo "File type:"
             file "${REPORT_FILE_PATH}"
-            echo "File contents (first lines):"
             head -n 20 "${REPORT_FILE_PATH}"
             exit 1
           fi
@@ -101,8 +100,26 @@ jobs:
         with:
           name: OWASP-Scan-Excel-Report
           path: '*.xlsx'
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install Python dependencies
+        run: |
+          pip install pandas openpyxl
+
       - name: Generate Allure JSON from Excel
+        run: |
+          python scripts/generate_allure_results.py
         env:
           REPORT_FILE_PATH: ${{ env.REPORT_FILE_PATH }}
-        run: |
-          python generate_allure_results.py
+
+      - name: Publish Allure Report
+        uses: simple-elf/allure-report-action@v1.8
+        with:
+          allure_results: allure-results
+          gh_pages: gh-pages
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
