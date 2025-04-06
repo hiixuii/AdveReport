@@ -118,8 +118,7 @@ jobs:
           ls -R
 
       - name: Generate Allure JSON from Excel
-        run: |
-          python scripts/generate_allure_results.py
+        run: python .github/scripts/generate_allure_results.py
         env:
           REPORT_FILE_PATH: ${{ env.REPORT_FILE_PATH }}
 
