@@ -110,6 +110,13 @@ jobs:
         run: |
           pip install pandas openpyxl
 
+      - name: Debug — Show files in workspace
+        run: |
+          echo "Current directory:"
+          pwd
+          echo "Files:"
+          ls -R
+
       - name: Generate Allure JSON from Excel
         run: |
           python scripts/generate_allure_results.py
