@@ -5,6 +5,10 @@ import os
 import uuid
 
 def generate_allure_results(excel_path, allure_results_dir="allure-results"):
+     # Verify file exists
+    if not os.path.exists(excel_path):
+        raise FileNotFoundError(f"Excel file not found at: {excel_path}")
+        
     # Read Excel sheets
     responses_df = pd.read_excel(excel_path, sheet_name="Responses")
     result_owasp_df = pd.read_excel(excel_path, sheet_name="Result (OWASP)")
