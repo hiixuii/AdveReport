@@ -116,11 +116,18 @@ jobs:
           pwd
           echo "Files:"
           ls -R
+          
+      - name: Verify Excel file exists
+        run: |
+          if [ ! -f "${{ env.REPORT_FILE_PATH }}" ]; then
+            echo "Excel file not found!"
+            exit 1
+          fi
+          echo "Verified Excel file exists: ${{ env.REPORT_FILE_PATH }}"
 
-      - name: Generate Allure JSON from Excel
-        run: python .github/scripts/generate_allure_results.py
-        env:
-          REPORT_FILE_PATH: ${{ env.REPORT_FILE_PATH }}
+      - name: Generate Allure results
+        run: |
+          python .github/scripts/generate_allure_report.py "${{ env.REPORT_FILE_PATH }}"
 
       - name: Generate Allure HTML Report
         uses: simple-elf/allure-report-action@v1.8
