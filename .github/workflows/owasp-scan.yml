@@ -49,7 +49,7 @@ jobs:
           SCAN_ID=$(echo "$RESPONSE" | jq -r '.id')
           echo "SCAN_ID=$SCAN_ID" >> $GITHUB_ENV
 
-      - name: Wait until scan completes (2 hours max)
+      - name: Wait until scan completes
         timeout-minutes: 130
         run: |
           for i in {1..260}; do
@@ -108,7 +108,7 @@ jobs:
 
       - name: Install Python dependencies
         run: |
-          pip install pandas openpyxl
+          pip install pandas openpyxl allure-combine
 
       - name: Debug — Show files in workspace
         run: |
@@ -129,23 +129,24 @@ jobs:
         run: |
           python .github/scripts/generate_allure_results.py "${{ env.REPORT_FILE_PATH }}"
 
-      - name: Generate Allure HTML Report
-        uses: simple-elf/allure-report-action@v1.8
-        with:
-          allure_results: allure-results
-          allure_report: allure-report
-          allure_history: allure-history
-          keep_reports: 20
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      - name: Generate Portable Allure Report
+        run: |
+          # Generate standard Allure report
+          allure generate allure-results -o allure-report --clean
+          
+          # Create single-file portable report
+          allure-combine allure-report --dest combined-report
+          
+          # Rename for clarity
+          mv combined-report/complete.html combined-report/owasp-scan-report.html
 
-      - name: Upload Allure HTML Report as Artifact
+      - name: Upload Portable Report
         uses: actions/upload-artifact@v4
         with:
-          name: Allure-HTML-Report
-          path: allure-report/
+          name: Portable-Allure-Report
+          path: combined-report/owasp-scan-report.html
 
-      - name: Upload Allure History for Next Run
+      - name: Upload Allure History
         uses: actions/upload-artifact@v4
         with:
           name: allure-history
