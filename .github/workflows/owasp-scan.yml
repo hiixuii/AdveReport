@@ -85,10 +85,10 @@ jobs:
           curl -fSL -o "${REPORT_FILE_PATH}" "${FULL_URL}"
 
           if file "${REPORT_FILE_PATH}" | grep -qE 'Microsoft Excel|Composite Document|Spreadsheet'; then
-            echo "Report downloaded and verified: ${REPORT_FILE_PATH}"
+            echo "✅ Report downloaded and verified: ${REPORT_FILE_PATH}"
             echo "REPORT_FILE_PATH=${REPORT_FILE_PATH}" >> $GITHUB_ENV
           else
-            echo "Downloaded file is NOT a valid Excel file"
+            echo "❌ Downloaded file is NOT a valid Excel file"
             file "${REPORT_FILE_PATH}"
             head -n 20 "${REPORT_FILE_PATH}"
             exit 1
@@ -110,28 +110,15 @@ jobs:
         run: |
           pip install pandas openpyxl allure-combine
 
-      - name: Debug — Show files in workspace
-        run: |
-          echo "Current directory:"
-          pwd
-          echo "Files:"
-          ls -R
-          
-      - name: Verify Excel file exists
-        run: |
-          if [ ! -f "${{ env.REPORT_FILE_PATH }}" ]; then
-            echo "Excel file not found!"
-            exit 1
-          fi
-          echo "Verified Excel file exists: ${{ env.REPORT_FILE_PATH }}"
-
       - name: Install Java (Allure dependency)
         run: sudo apt-get install -y openjdk-17-jre
 
       - name: Install Allure CLI
-        uses: 239yaroslav/allure-report-action@v1.1
-        with:
-          version: 2.27.0
+        run: |
+          wget https://github.com/allure-framework/allure2/releases/download/2.27.0/allure-2.27.0.tgz
+          tar -zxvf allure-2.27.0.tgz
+          sudo mv allure-2.27.0 /opt/allure
+          sudo ln -s /opt/allure/bin/allure /usr/bin/allure
 
       - name: Generate Allure results
         run: |
@@ -139,13 +126,8 @@ jobs:
 
       - name: Generate Portable Allure Report
         run: |
-          # Generate standard report
           allure generate allure-results -o allure-report --clean
-          
-          # Create single-file report
           allure-combine allure-report --dest combined-report
-          
-          # Rename final file
           mv combined-report/complete.html combined-report/owasp-scan-report.html
 
       - name: Upload Portable Report
