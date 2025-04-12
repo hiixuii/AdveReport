@@ -124,16 +124,14 @@ jobs:
             exit 1
           fi
           echo "Verified Excel file exists: ${{ env.REPORT_FILE_PATH }}"
+
+      - name: Install Java (Allure dependency)
+        run: sudo apt-get install -y openjdk-17-jre
+
       - name: Install Allure CLI
-        run: |
-          # Download latest Allure
-          wget https://github.com/allure-framework/allure2/releases/download/2.27.0/allure-2.27.0.tgz
-          tar -zxvf allure-2.27.0.tgz
-          sudo mv allure-2.27.0 /opt/allure
-          echo "/opt/allure/bin" >> $GITHUB_PATH
-          
-          # Verify installation
-          allure --version
+        uses: 239yaroslav/allure-report-action@v1.1
+        with:
+          version: 2.27.0
 
       - name: Generate Allure results
         run: |
@@ -141,9 +139,6 @@ jobs:
 
       - name: Generate Portable Allure Report
         run: |
-          # Install required Java dependency
-          sudo apt-get install -y openjdk-17-jre
-          
           # Generate standard report
           allure generate allure-results -o allure-report --clean
           
@@ -152,11 +147,12 @@ jobs:
           
           # Rename final file
           mv combined-report/complete.html combined-report/owasp-scan-report.html
-            - name: Upload Portable Report
-              uses: actions/upload-artifact@v4
-              with:
-                name: Portable-Allure-Report
-                path: combined-report/owasp-scan-report.html
+
+      - name: Upload Portable Report
+        uses: actions/upload-artifact@v4
+        with:
+          name: Portable-Allure-Report
+          path: combined-report/owasp-scan-report.html
 
       - name: Upload Allure History
         uses: actions/upload-artifact@v4
