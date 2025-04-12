@@ -127,7 +127,7 @@ jobs:
 
       - name: Generate Allure results
         run: |
-          python .github/scripts/generate_allure_report.py "${{ env.REPORT_FILE_PATH }}"
+          python .github/scripts/generate_allure_results.py "${{ env.REPORT_FILE_PATH }}"
 
       - name: Generate Allure HTML Report
         uses: simple-elf/allure-report-action@v1.8
