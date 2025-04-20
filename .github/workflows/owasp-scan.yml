@@ -15,13 +15,14 @@ jobs:
         with:
           fetch-depth: 0
 
-      # 2) Start OWASP scan
+      # 2) Trigger OWASP scan and capture the ID
       - name: Trigger OWASP Scan
         id: trigger
         run: |
-          RESPONSE=$(curl -s -X POST "http://34.135.194.57:28291/start_scan" \
+          echo "Starting OWASP scan..."
+          RESPONSE=$(curl -sS -X POST "http://34.135.194.57:28291/start_scan" \
             -H "Content-Type: application/json" \
-            -d '{
+            --data-raw '{
               "options": {
                 "categories": ["Jailbreak","OWASP1","OWASP2","OWASP3","OWASP4","OWASP5","OWASP6","OWASP7","OWASP8","OWASP9","OWASP10"],
                 "quality_level": 0,
@@ -49,37 +50,47 @@ jobs:
               "files": {},
               "debug": true
             }')
-          echo "SCAN_ID=$(echo \"$RESPONSE\" | jq -r '.id')" >> $GITHUB_ENV
+          echo "Response payload: $RESPONSE"
+          SCAN_ID=$(echo "$RESPONSE" | jq -r '.id // empty')
+          if [[ -z "$SCAN_ID" ]]; then
+            echo "Failed to get scan ID from response"; exit 1
+          fi
+          echo "SCAN_ID=$SCAN_ID" >> $GITHUB_ENV
 
-      # 3) Poll until Done / Error
+      # 3) Poll until status=Done (or bail on Error/timeout)
       - name: Wait for scan to finish
         timeout-minutes: 150
         run: |
           for i in {1..260}; do
-            STATUS_RESPONSE=$(curl -s "http://34.135.194.57:28291/check_task" \
+            STATUS_RESPONSE=$(curl -sS "http://34.135.194.57:28291/check_task" \
               -H "Content-Type: application/json" \
               -d "{\"id\":\"${SCAN_ID}\"}")
-            STATUS=$(echo "$STATUS_RESPONSE" | jq -r '.status')
-            echo "Poll #$i: $STATUS"
+            echo "Status response #$i: $STATUS_RESPONSE"
+            STATUS=$(echo "$STATUS_RESPONSE" | jq -r '.status // empty')
             if [[ "$STATUS" == "Done" ]]; then
-              REPORT_FILE=$(echo "$STATUS_RESPONSE" | jq -r '.Result')
+              REPORT_FILE=$(echo "$STATUS_RESPONSE" | jq -r '.Result // empty')
+              echo "Scan completed, report file: $REPORT_FILE"
               echo "REPORT_FILE=$REPORT_FILE" >> $GITHUB_ENV
-              exit 0
+              break
             elif [[ "$STATUS" == "Error" ]]; then
-              echo "❌ Scan errored"; exit 1
+              echo "Scan returned Error status"; exit 1
             fi
             sleep 30
           done
-          echo "⏰ Timed out"; exit 1
 
-      # 4) Download Excel report
+          if [[ -z "${REPORT_FILE}" ]]; then
+            echo "Scan did not finish within timeout"; exit 1
+          fi
+
+      # 4) Download the Excel report
       - name: Download Excel Report
         if: env.REPORT_FILE != ''
         run: |
           curl -fSL -o report.xlsx "http://34.135.194.57:28291/download-file/${REPORT_FILE}"
+          echo "Downloaded report.xlsx"
           echo "REPORT_FILE_PATH=report.xlsx" >> $GITHUB_ENV
 
-      # 5) (Optional) Upload raw Excel
+      # 5) (Optional) Upload the raw Excel for reference
       - name: Upload OWASP Excel
         if: env.REPORT_FILE_PATH != ''
         uses: actions/upload-artifact@v4
@@ -87,21 +98,21 @@ jobs:
           name: OWASP-Scan-Excel-Report
           path: report.xlsx
 
-      # 6) Generate Allure JSON
-      - name: Set up Python
+      # 6) Generate Allure JSON from that Excel
+      - name: Set up Python 3.11
         uses: actions/setup-python@v5
         with:
           python-version: '3.11'
 
-      - name: Install dependencies
+      - name: Install Python dependencies
         run: pip install pandas openpyxl
 
-      - name: Generate Allure JSON from Excel
+      - name: Generate Allure JSON
         run: python .github/scripts/generate_allure_results.py
         env:
           REPORT_FILE_PATH: ${{ env.REPORT_FILE_PATH }}
 
-      # 7) PRE‑CREATE the folders
+      # 7) PRE‑CREATE the Allure directories
       - name: Prepare Allure folders
         run: |
           mkdir -p allure-results
@@ -116,7 +127,7 @@ jobs:
           path: allure-history
           fail-on-missing: false
 
-      # 9) Generate & combine the HTML
+      # 9) Generate & merge history into HTML
       - name: Generate Allure HTML Report
         uses: simple-elf/allure-report-action@v1.8
         with:
@@ -125,7 +136,7 @@ jobs:
           allure_history: allure-history
           keep_reports: 20
 
-      # 10) Upload HTML + history as artifacts
+      # 10) Upload final HTML + updated history
       - name: Upload Allure HTML
         uses: actions/upload-artifact@v4
         with:
@@ -138,8 +149,8 @@ jobs:
           name: allure-history
           path: allure-history/
 
-      # 11) Deploy to `reports` branch for CDN hosting
-      - name: Deploy Allure to ‘reports’ branch
+      # 11) Deploy static site to reports branch for CDN hosting
+      - name: Deploy to reports branch
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
