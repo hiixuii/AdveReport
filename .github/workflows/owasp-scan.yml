@@ -108,10 +108,9 @@ jobs:
         run: pip install pandas openpyxl
 
       - name: Generate Allure JSON
-        run: python .github/scripts/generate_allure_results.py
+        run: python .github/scripts/generate_allure_results.py "${REPORT_FILE_PATH}"
         env:
           REPORT_FILE_PATH: ${{ env.REPORT_FILE_PATH }}
-
       # 7) PRE‑CREATE the Allure directories
       - name: Prepare Allure folders
         run: |
