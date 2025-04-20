@@ -9,86 +9,57 @@ jobs:
     timeout-minutes: 180
 
     steps:
-      # 1) Checkout full history (needed for the deploy step)
+      # 1) Checkout full history for branch pushes
       - name: Checkout Repository
         uses: actions/checkout@v4
         with:
-          token: ${{ secrets.GITHUB_TOKEN }}
           fetch-depth: 0
 
-      # 2) Trigger the OWASP scan
+      # 2) Start OWASP scan
       - name: Trigger OWASP Scan
         id: trigger
         run: |
           RESPONSE=$(curl -X POST "http://34.135.194.57:28291/start_scan" \
             -H "Content-Type: application/json" \
-            -d '{
-              "options": {
-                "categories": ["Jailbreak","OWASP1","OWASP2","OWASP3","OWASP4","OWASP5","OWASP6","OWASP7","OWASP8","OWASP9","OWASP10"],
-                "quality_level": 0, "response_details_level": 0,
-                "languages":"en","attack_type":[0],"repeat_count":1,
-                "risk_categories": [],"custom_risk": null,"owasp_version":"2024"
-              },
-              "template": {"prefix":"","postfix":"","config_name":null},
-              "restrictions":{
-                "total_limit":null,"attack_type_limit":[null,null,null,null],
-                "delete_duplicates":false
-              },
-              "model":{
-                "provider":"Preconfigured models",
-                "model_name":"echo",
-                "model_type":"local",
-                "custom_host":"",
-                "api_key":""
-              },
-              "files":{}, "debug":true
-            }')
-          echo "Response: $RESPONSE"
-          SCAN_ID=$(echo "$RESPONSE" | jq -r '.id')
-          echo "SCAN_ID=$SCAN_ID" >> $GITHUB_ENV
+            -d '{ … }')
+          echo "SCAN_ID=$(echo "$RESPONSE" | jq -r '.id')" >> $GITHUB_ENV
 
-      # 3) Poll until it's Done or times out
+      # 3) Poll until Done / Error
       - name: Wait for scan to finish
         timeout-minutes: 150
         run: |
           for i in {1..260}; do
-            STATUS_RESPONSE=$(curl -s "http://34.135.194.57:28291/check_task" \
-              -H "Content-Type: application/json" \
-              -d "{\"id\": \"${SCAN_ID}\"}")
-            STATUS=$(echo "$STATUS_RESPONSE" | jq -r '.status')
+            STATUS=$(curl -s "http://34.135.194.57:28291/check_task" \
+                     -H "Content-Type: application/json" \
+                     -d "{\"id\": \"${SCAN_ID}\"}" \
+                   | jq -r '.status')
             echo "Poll #$i: $STATUS"
             if [[ "$STATUS" == "Done" ]]; then
-              FILE_NAME=$(echo "$STATUS_RESPONSE" | jq -r '.Result')
-              echo "REPORT_FILE=$FILE_NAME" >> $GITHUB_ENV
+              echo "REPORT_FILE=$(curl -s … | jq -r '.Result')" >> $GITHUB_ENV
               exit 0
             elif [[ "$STATUS" == "Error" ]]; then
-              echo "❌ Scan errored out"; exit 1
+              echo "❌ Scan errored"; exit 1
             fi
             sleep 30
           done
-          echo "⏰ Timed out waiting for scan"; exit 1
+          echo "⏰ Timed out"; exit 1
 
-      # 4) Download the Excel report
+      # 4) Download Excel report
       - name: Download Excel Report
         if: env.REPORT_FILE != ''
         run: |
-          BASENAME=$(basename "${REPORT_FILE}")
-          curl -fSL -o "${BASENAME}" "http://34.135.194.57:28291/download-file/${REPORT_FILE}"
-          # simple sanity check
-          if ! file "${BASENAME}" | grep -qE 'Excel|Spreadsheet'; then
-            echo "Bad download"; exit 1
-          fi
-          echo "REPORT_FILE_PATH=${BASENAME}" >> $GITHUB_ENV
+          curl -fSL -o report.xlsx "http://34.135.194.57:28291/download-file/${REPORT_FILE}"
+          echo "REPORT_FILE_PATH=report.xlsx" >> $GITHUB_ENV
 
-      # 5) Save raw Excel as artifact (optional)
+      # 5) (Optional) Upload raw Excel
       - name: Upload OWASP Excel
         if: env.REPORT_FILE_PATH != ''
         uses: actions/upload-artifact@v4
         with:
           name: OWASP-Scan-Excel-Report
-          path: ${{ env.REPORT_FILE_PATH }}
+          path: report.xlsx
 
-      # 6) Prepare Python & convert to Allure JSON
+      # 6) Generate Allure JSON
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
@@ -102,14 +73,14 @@ jobs:
         env:
           REPORT_FILE_PATH: ${{ env.REPORT_FILE_PATH }}
 
-      # ──────────────────────────────────────────────────────────────────────
-      # 7) PRE‑CREATE the folders so 'allure-combine' never complains
+      # 7) PRE‑CREATE the folders
       - name: Prepare Allure folders
         run: |
+          mkdir -p allure-results
           mkdir -p allure-report
           mkdir -p allure-history
 
-      # 8) Grab last run’s history (first run will continue if none)
+      # 8) Fetch last run’s history (first run will skip)
       - name: Download previous Allure history
         uses: actions/download-artifact@v3
         with:
@@ -117,7 +88,7 @@ jobs:
           path: allure-history
           fail-on-missing: false
 
-      # 9) Generate the HTML report + merge history
+      # 9) Generate & combine the HTML
       - name: Generate Allure HTML Report
         uses: simple-elf/allure-report-action@v1.8
         with:
@@ -126,7 +97,7 @@ jobs:
           allure_history: allure-history
           keep_reports: 20
 
-      # 10) Upload new report + updated history as artifacts
+      # 10) Upload HTML + history as artifacts
       - name: Upload Allure HTML
         uses: actions/upload-artifact@v4
         with:
@@ -139,7 +110,7 @@ jobs:
           name: allure-history
           path: allure-history/
 
-      # 11) Deploy static site into `reports` branch (for jsDelivr/raw.githack)
+      # 11) Deploy to `reports` branch for CDN hosting
       - name: Deploy Allure to ‘reports’ branch
         run: |
           git config user.name "github-actions[bot]"
@@ -148,7 +119,7 @@ jobs:
           git rm -rf .
           cp -r allure-report/* .
           git add .
-          git commit -m "Deploy Allure report – run ${{ github.run_number }}"
+          git commit -m "Deploy Allure report – run #${{ github.run_number }}"
           git push -f origin reports
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
