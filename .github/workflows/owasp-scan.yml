@@ -1,7 +1,9 @@
 name: OWASP Scan Workflow
 
 permissions:
-  contents: write
+  contents: write      # for checkout + commits
+  pages: write         # for deploying via actions-gh-pages
+  id-token: write      # only needed if you do OIDC later
 
 on:
   workflow_dispatch:
@@ -150,5 +152,7 @@ jobs:
         uses: peaceiris/actions-gh-pages@v4
         with:
           github_token: ${{ secrets.GITHUB_TOKEN }}
-          publish_dir: ./allure-report  # Your Allure report directory
-          keep_files: false  # Clean old files
+          publish_branch: gh-pages
+          publish_dir: ./allure-report
+          keep_files: false      # remove stale files
+          force_orphan: true     # starts fresh each run
