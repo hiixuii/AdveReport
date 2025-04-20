@@ -19,30 +19,58 @@ jobs:
       - name: Trigger OWASP Scan
         id: trigger
         run: |
-          RESPONSE=$(curl -X POST "http://34.135.194.57:28291/start_scan" \
+          RESPONSE=$(curl -s -X POST "http://34.135.194.57:28291/start_scan" \
             -H "Content-Type: application/json" \
-            -d '{ … }')
-          echo "SCAN_ID=$(echo "$RESPONSE" | jq -r '.id')" >> $GITHUB_ENV
+            -d '{
+              "options": {
+                "categories": ["Jailbreak","OWASP1","OWASP2","OWASP3","OWASP4","OWASP5","OWASP6","OWASP7","OWASP8","OWASP9","OWASP10"],
+                "quality_level": 0,
+                "response_details_level": 0,
+                "languages": "en",
+                "attack_type": [0],
+                "repeat_count": 1,
+                "risk_categories": [],
+                "custom_risk": null,
+                "owasp_version": "2024"
+              },
+              "template": {"prefix": "", "postfix": "", "config_name": null},
+              "restrictions": {
+                "total_limit": null,
+                "attack_type_limit": [null,null,null,null],
+                "delete_duplicates": false
+              },
+              "model": {
+                "provider": "Preconfigured models",
+                "model_name": "echo",
+                "model_type": "local",
+                "custom_host": "",
+                "api_key": ""
+              },
+              "files": {},
+              "debug": true
+            }')
+          echo "SCAN_ID=$(echo \"$RESPONSE\" | jq -r '.id')" >> $GITHUB_ENV
 
       # 3) Poll until Done / Error
       - name: Wait for scan to finish
         timeout-minutes: 150
         run: |
           for i in {1..260}; do
-            STATUS=$(curl -s "http://34.135.194.57:28291/check_task" \
-                     -H "Content-Type: application/json" \
-                     -d "{\"id\": \"${SCAN_ID}\"}" \
-                   | jq -r '.status')
+            STATUS_RESPONSE=$(curl -s "http://34.135.194.57:28291/check_task" \
+              -H "Content-Type: application/json" \
+              -d "{\"id\":\"${SCAN_ID}\"}")
+            STATUS=$(echo "$STATUS_RESPONSE" | jq -r '.status')
             echo "Poll #$i: $STATUS"
             if [[ "$STATUS" == "Done" ]]; then
-              echo "REPORT_FILE=$(curl -s … | jq -r '.Result')" >> $GITHUB_ENV
+              REPORT_FILE=$(echo "$STATUS_RESPONSE" | jq -r '.Result')
+              echo "REPORT_FILE=$REPORT_FILE" >> $GITHUB_ENV
               exit 0
             elif [[ "$STATUS" == "Error" ]]; then
-              echo "Scan errored"; exit 1
+              echo "❌ Scan errored"; exit 1
             fi
             sleep 30
           done
-          echo "Timed out"; exit 1
+          echo "⏰ Timed out"; exit 1
 
       # 4) Download Excel report
       - name: Download Excel Report
@@ -82,7 +110,7 @@ jobs:
 
       # 8) Fetch last run’s history (first run will skip)
       - name: Download previous Allure history
-        uses: actions/download-artifact@v2
+        uses: actions/download-artifact@v4
         with:
           name: allure-history
           path: allure-history
