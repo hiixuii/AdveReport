@@ -124,7 +124,7 @@ jobs:
         with:
           name: allure-history
           path: allure-history
-          fail-on-missing: false
+          continue-on-error: true
 
       # 9) Generate & merge history into HTML
       - name: Generate Allure HTML Report
