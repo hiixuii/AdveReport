@@ -151,12 +151,12 @@ jobs:
           name: allure-history
           path: allure-history/
 
-      # 11) Deploy to Surge.sh (choose this OR the branch below)
+      # 11) Deploy to Surge.sh (fixed)
       - name: Deploy to Surge
-        uses: surge-sh/action@main
+        uses: surge-sh/action@main#action
         with:
           surgeToken: ${{ secrets.SURGE_TOKEN }}
-          domain: owasp-scan-report.surge.sh  # Fixed domain (overwrite each time)
+          domain: owasp-scan-report-${{ github.run_id }}.surge.sh
           project: ./allure-report/
 
       # 12) Alternative: Deploy to reports branch (GitHub Pages)
