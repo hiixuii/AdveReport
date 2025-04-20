@@ -153,7 +153,7 @@ jobs:
 
       # 11) Deploy to Surge.sh (choose this OR the branch below)
       - name: Deploy to Surge
-        uses: surge-sh/action@v1
+        uses: surge-sh/action@main
         with:
           surgeToken: ${{ secrets.SURGE_TOKEN }}
           domain: owasp-scan-report.surge.sh  # Fixed domain (overwrite each time)
