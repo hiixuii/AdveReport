@@ -1,5 +1,8 @@
 name: OWASP Scan Workflow
 
+permissions:
+  contents: write
+
 on:
   workflow_dispatch:
 
