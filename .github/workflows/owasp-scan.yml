@@ -3,7 +3,7 @@ name: OWASP Scan Workflow
 permissions:
   contents: write      # for checkout + commits
   pages: write         # for deploying via actions-gh-pages
-  id-token: write      # if you ever use OIDC
+  id-token: write      # for OIDC (optional)
 
 on:
   workflow_dispatch:
@@ -14,111 +14,161 @@ jobs:
     timeout-minutes: 180
 
     steps:
-      # 1) Checkout your code (needed for scanner + for later commits)
-      - name: Checkout Repository
+      # Step 1: Checkout repository (full history)
+      - name: "1. Checkout Repository"
         uses: actions/checkout@v4
         with:
           fetch-depth: 0
 
-      # 2) Trigger OWASP scan
-      - name: Trigger OWASP Scan
+      # Step 2: Trigger OWASP scan and capture the ID
+      - name: "2. Trigger OWASP Scan"
         id: trigger
         run: |
+          echo "Starting OWASP scan..."
           RESPONSE=$(curl -sS -X POST "http://34.135.194.57:28291/start_scan" \
             -H "Content-Type: application/json" \
-            --data-raw '{…}')
+            --data-raw '{
+              "options": {
+                "categories": ["Jailbreak","OWASP1","OWASP2","OWASP3","OWASP4","OWASP5","OWASP6","OWASP7","OWASP8","OWASP9","OWASP10"],
+                "quality_level": 0,
+                "response_details_level": 0,
+                "languages": "en",
+                "attack_type": [0],
+                "repeat_count": 1,
+                "risk_categories": [],
+                "custom_risk": null,
+                "owasp_version": "2024"
+              },
+              "template": {"prefix": "", "postfix": "", "config_name": null},
+              "restrictions": {
+                "total_limit": null,
+                "attack_type_limit": [null,null,null,null],
+                "delete_duplicates": false
+              },
+              "model": {
+                "provider": "Preconfigured models",
+                "model_name": "echo",
+                "model_type": "local",
+                "custom_host": "",
+                "api_key": ""
+              },
+              "files": {},
+              "debug": true
+            }')
           echo "Response payload: $RESPONSE"
           SCAN_ID=$(echo "$RESPONSE" | jq -r '.id // empty')
-          [[ -n "$SCAN_ID" ]] || (echo "No scan ID" && exit 1)
+          if [[ -z "$SCAN_ID" ]]; then
+            echo "Failed to get scan ID from response"; exit 1
+          fi
           echo "SCAN_ID=$SCAN_ID" >> $GITHUB_ENV
 
-      # 3) Wait for scan to finish
-      - name: Wait for scan to finish
+      # Step 3: Wait for scan to finish
+      - name: "3. Wait for scan to finish"
         timeout-minutes: 150
         run: |
           for i in {1..260}; do
-            S=$(curl -sS "http://34.135.194.57:28291/check_task" \
-                 -H "Content-Type: application/json" \
-                 -d "{\"id\":\"${SCAN_ID}\"}")
-            STATUS=$(echo "$S" | jq -r '.status // empty')
-            [[ "$STATUS" == "Done" ]] && {
-              echo "REPORT_FILE=$(echo "$S" | jq -r '.Result // empty')" >> $GITHUB_ENV
+            STATUS_RESPONSE=$(curl -sS "http://34.135.194.57:28291/check_task" \
+              -H "Content-Type: application/json" \
+              -d "{\"id\":\"${SCAN_ID}\"}")
+            echo "Status response #$i: $STATUS_RESPONSE"
+            STATUS=$(echo "$STATUS_RESPONSE" | jq -r '.status // empty')
+            if [[ "$STATUS" == "Done" ]]; then
+              REPORT_FILE=$(echo "$STATUS_RESPONSE" | jq -r '.Result // empty')
+              echo "Scan completed, report file: $REPORT_FILE"
+              echo "REPORT_FILE=$REPORT_FILE" >> $GITHUB_ENV
               break
-            }
-            [[ "$STATUS" == "Error" ]] && { echo "Scan Error"; exit 1; }
+            elif [[ "$STATUS" == "Error" ]]; then
+              echo "Scan returned Error status"; exit 1
+            fi
             sleep 30
           done
-          [[ -n "${REPORT_FILE}" ]] || { echo "Timed out"; exit 1; }
 
-      # 4) Download the Excel
-      - name: Download Excel Report
+          if [[ -z "${REPORT_FILE}" ]]; then
+            echo "Scan did not finish within timeout"; exit 1
+          fi
+
+      # Step 4: Download Excel report
+      - name: "4. Download Excel Report"
         if: env.REPORT_FILE != ''
         run: |
           curl -fSL -o report.xlsx "http://34.135.194.57:28291/download-file/${REPORT_FILE}"
+          echo "Downloaded report.xlsx"
           echo "REPORT_FILE_PATH=report.xlsx" >> $GITHUB_ENV
 
-      # 5) (Optional) save raw Excel
-      - name: Upload OWASP Excel
+      # Step 5: Upload raw Excel as artifact (optional)
+      - name: "5. Upload OWASP Excel"
         if: env.REPORT_FILE_PATH != ''
         uses: actions/upload-artifact@v4
         with:
           name: OWASP-Scan-Excel-Report
           path: report.xlsx
 
-      # 6) Generate Allure JSON
-      - name: Set up Python
+      # Step 6: Set up Python 3.11
+      - name: "6. Set up Python 3.11"
         uses: actions/setup-python@v5
         with:
-          python-version: 3.11
+          python-version: '3.11'
 
-      - name: Install Python deps
+      # Step 7: Install Python dependencies
+      - name: "7. Install Python dependencies"
         run: pip install pandas openpyxl
 
-      - name: Generate Allure JSON from Excel
+      # Step 8: Generate Allure JSON from Excel
+      - name: "8. Generate Allure JSON"
         run: python .github/scripts/generate_allure_results.py "${REPORT_FILE_PATH}"
         env:
           REPORT_FILE_PATH: ${{ env.REPORT_FILE_PATH }}
 
-      # 7) Prepare Allure folders
-      - name: Create Allure dirs
+      # Step 9: Prepare Allure directories
+      - name: "9. Prepare Allure folders"
         run: |
           mkdir -p allure-results
           mkdir -p allure-report
+          mkdir -p allure-history
 
-      # 8) Restore history from gh-pages
-      - name: Checkout gh-pages for history
+      # Step 10: Checkout gh-pages for history
+      - name: "10. Checkout gh-pages for history"
         uses: actions/checkout@v4
         with:
           ref: gh-pages
           path: gh-pages
           fetch-depth: 0
 
-      - name: Copy prior history
+      # Step 11: Restore Allure history into results
+      - name: "11. Restore Allure history"
         run: |
           mkdir -p allure-results/history
           cp -r gh-pages/history/* allure-results/history/ || echo "no prior history"
 
-      # 9) Generate HTML with merged history
-      - name: Generate Allure HTML Report
+      # Step 12: Generate & merge history into HTML
+      - name: "12. Generate Allure HTML Report"
         uses: simple-elf/allure-report-action@v1.8
         with:
           allure_results: allure-results
           allure_report: allure-report
-          allure_history: allure-results/history
+          allure_history: allure-report/history
           keep_reports: 20
 
-      # 10) (Optional) Upload HTML artifact
-      - name: Upload Allure HTML
+      # Step 13: Disable Jekyll for GitHub Pages
+      - name: "13. Disable Jekyll"
+        run: touch allure-report/.nojekyll
+
+      # Step 14: Upload Allure HTML as artifact
+      - name: "14. Upload Allure HTML"
         uses: actions/upload-artifact@v4
         with:
           name: allure-report
-          path: allure-report
+          path: allure-report/
 
-      # 11) Disable Jekyll & Deploy to GitHub Pages
-      - name: Disable Jekyll
-        run: touch allure-report/.nojekyll
+      # Step 15: Upload updated Allure history for next run
+      - name: "15. Upload Allure History"
+        uses: actions/upload-artifact@v4
+        with:
+          name: allure-history
+          path: allure-report/history
 
-      - name: Deploy to GitHub Pages
+      # Step 16: Deploy to GitHub Pages
+      - name: "16. Deploy to GitHub Pages"
         uses: peaceiris/actions-gh-pages@v4
         with:
           github_token: ${{ secrets.GITHUB_TOKEN }}
