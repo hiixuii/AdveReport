@@ -138,37 +138,17 @@ jobs:
           allure_history: allure-history  # Requires restored history
           keep_reports: 20
 
-      # 10) Upload artifacts (history + report)
+      # 10) Upload Allure HTML Report
       - name: Upload Allure HTML
         uses: actions/upload-artifact@v4
         with:
           name: Allure-HTML-Report
           path: allure-report/
 
-      - name: Upload Allure History
-        uses: actions/upload-artifact@v4
+      # 11) Deploy to GitHub Pages
+      - name: Deploy to GitHub Pages
+        uses: peaceiris/actions-gh-pages@v4
         with:
-          name: allure-history
-          path: allure-history/
-
-     # 11) Deploy to Surge.sh via CLI
-      - name: Install Surge CLI
-        run: npm install --global surge
-
-      - name: Deploy Report to Surge
-        run: surge ./allure-report owasp-scan-report-${{ github.run_id }}.surge.sh
-        env:
-          SURGE_TOKEN: ${{ secrets.SURGE_TOKEN }}
-
-      # 12) Alternative: Deploy to reports branch (GitHub Pages)
-      - name: Deploy to reports branch
-        if: false  # Disabled if using Surge
-        run: |
-          git fetch origin reports --depth=1
-          git checkout reports
-          cp -r allure-report/* .
-          git add .
-          git commit -m "Deploy report #${{ github.run_number }}"
-          git push origin reports
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+          publish_dir: ./allure-report  # Your Allure report directory
+          keep_files: false  # Clean old files
