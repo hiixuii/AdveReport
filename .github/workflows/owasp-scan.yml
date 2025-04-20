@@ -151,26 +151,22 @@ jobs:
           allure_history: history
           keep_reports: 20
 
-      # Step 13: Disable Jekyll for GitHub Pages
-      - name: "13. Disable Jekyll"
-        run: touch allure-report/.nojekyll
-
-      # Step 14: Upload Allure HTML as artifact
-      - name: "14. Upload Allure HTML"
+      # Step 13: Upload Allure HTML as artifact
+      - name: "13. Upload Allure HTML"
         uses: actions/upload-artifact@v4
         with:
           name: allure-report
           path: allure-report/
 
-      # Step 15: Upload updated Allure history for next run
-      - name: "15. Upload Allure History"
+      # Step 14: Upload updated Allure history for next run
+      - name: "14. Upload Allure History"
         uses: actions/upload-artifact@v4
         with:
           name: allure-history
           path: allure-report/history
 
-      # Step 16: Deploy to GitHub Pages
-      - name: "16. Deploy to GitHub Pages"
+      # Step 15: Deploy to GitHub Pages (auto‑disables Jekyll)
+      - name: "15. Deploy to GitHub Pages"
         uses: peaceiris/actions-gh-pages@v4
         with:
           github_token: ${{ secrets.GITHUB_TOKEN }}
@@ -178,3 +174,4 @@ jobs:
           publish_dir: ./allure-report
           keep_files: false
           force_orphan: true
+          nojekyll: true
