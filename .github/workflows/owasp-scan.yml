@@ -6,12 +6,17 @@ on:
 jobs:
   run-scan:
     runs-on: ubuntu-latest
-    timeout-minutes: 150
+    timeout-minutes: 180
 
     steps:
+      # 1) Checkout full history (needed for the deploy step)
       - name: Checkout Repository
         uses: actions/checkout@v4
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+          fetch-depth: 0
 
+      # 2) Trigger the OWASP scan
       - name: Trigger OWASP Scan
         id: trigger
         run: |
@@ -19,125 +24,131 @@ jobs:
             -H "Content-Type: application/json" \
             -d '{
               "options": {
-                "categories": ["Jailbreak", "OWASP1", "OWASP2", "OWASP3", "OWASP4", "OWASP5", "OWASP6", "OWASP7", "OWASP8", "OWASP9", "OWASP10"],
-                "quality_level": 0,
-                "response_details_level": 0,
-                "languages": "en",
-                "attack_type": [0],
-                "repeat_count": 1,
-                "risk_categories": [],
-                "custom_risk": null,
-                "owasp_version": "2024"
+                "categories": ["Jailbreak","OWASP1","OWASP2","OWASP3","OWASP4","OWASP5","OWASP6","OWASP7","OWASP8","OWASP9","OWASP10"],
+                "quality_level": 0, "response_details_level": 0,
+                "languages":"en","attack_type":[0],"repeat_count":1,
+                "risk_categories": [],"custom_risk": null,"owasp_version":"2024"
               },
-              "template": {"prefix": "", "postfix": "", "config_name": null},
-              "restrictions": {
-                "total_limit": null,
-                "attack_type_limit": [null, null, null, null],
-                "delete_duplicates": false
+              "template": {"prefix":"","postfix":"","config_name":null},
+              "restrictions":{
+                "total_limit":null,"attack_type_limit":[null,null,null,null],
+                "delete_duplicates":false
               },
-              "model": {
-                "provider": "Preconfigured models",
-                "model_name": "echo",
-                "model_type": "local",
-                "custom_host": "",
-                "api_key": ""
+              "model":{
+                "provider":"Preconfigured models",
+                "model_name":"echo",
+                "model_type":"local",
+                "custom_host":"",
+                "api_key":""
               },
-              "files": {},
-              "debug": true
+              "files":{}, "debug":true
             }')
           echo "Response: $RESPONSE"
           SCAN_ID=$(echo "$RESPONSE" | jq -r '.id')
           echo "SCAN_ID=$SCAN_ID" >> $GITHUB_ENV
 
-      - name: Wait until scan completes
-        timeout-minutes: 130
+      # 3) Poll until it's Done or times out
+      - name: Wait for scan to finish
+        timeout-minutes: 150
         run: |
           for i in {1..260}; do
             STATUS_RESPONSE=$(curl -s "http://34.135.194.57:28291/check_task" \
               -H "Content-Type: application/json" \
               -d "{\"id\": \"${SCAN_ID}\"}")
-
             STATUS=$(echo "$STATUS_RESPONSE" | jq -r '.status')
-            TIMESTAMP=$(date '+%H:%M:%S')
-            echo "[$TIMESTAMP] Poll #$i: status=$STATUS"
-
+            echo "Poll #$i: $STATUS"
             if [[ "$STATUS" == "Done" ]]; then
               FILE_NAME=$(echo "$STATUS_RESPONSE" | jq -r '.Result')
-              echo "✅ Scan completed! Report file: $FILE_NAME"
               echo "REPORT_FILE=$FILE_NAME" >> $GITHUB_ENV
               exit 0
             elif [[ "$STATUS" == "Error" ]]; then
-              echo "❌ Scan returned Error status!"
-              exit 1
+              echo "❌ Scan errored out"; exit 1
             fi
-
             sleep 30
           done
+          echo "⏰ Timed out waiting for scan"; exit 1
 
-          echo "⏰ Timeout after 2 hours!"
-          exit 1
-
+      # 4) Download the Excel report
       - name: Download Excel Report
         if: env.REPORT_FILE != ''
         run: |
-          REPORT_FILE_PATH=$(basename "${REPORT_FILE}")
-          FULL_URL="http://34.135.194.57:28291/download-file/${REPORT_FILE}"
-          curl -fSL -o "${REPORT_FILE_PATH}" "${FULL_URL}"
-
-          if file "${REPORT_FILE_PATH}" | grep -qE 'Microsoft Excel|Composite Document|Spreadsheet'; then
-            echo "✅ Report downloaded and verified: ${REPORT_FILE_PATH}"
-            echo "REPORT_FILE_PATH=${REPORT_FILE_PATH}" >> $GITHUB_ENV
-          else
-            echo "❌ Downloaded file is NOT a valid Excel file"
-            file "${REPORT_FILE_PATH}"
-            head -n 20 "${REPORT_FILE_PATH}"
-            exit 1
+          BASENAME=$(basename "${REPORT_FILE}")
+          curl -fSL -o "${BASENAME}" "http://34.135.194.57:28291/download-file/${REPORT_FILE}"
+          # simple sanity check
+          if ! file "${BASENAME}" | grep -qE 'Excel|Spreadsheet'; then
+            echo "Bad download"; exit 1
           fi
+          echo "REPORT_FILE_PATH=${BASENAME}" >> $GITHUB_ENV
 
-      - name: Save Excel Report as Artifact
+      # 5) Save raw Excel as artifact (optional)
+      - name: Upload OWASP Excel
         if: env.REPORT_FILE_PATH != ''
         uses: actions/upload-artifact@v4
         with:
           name: OWASP-Scan-Excel-Report
-          path: '*.xlsx'
+          path: ${{ env.REPORT_FILE_PATH }}
 
+      # 6) Prepare Python & convert to Allure JSON
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
           python-version: '3.11'
 
-      - name: Install Python dependencies
+      - name: Install dependencies
+        run: pip install pandas openpyxl
+
+      - name: Generate Allure JSON from Excel
+        run: python .github/scripts/generate_allure_results.py
+        env:
+          REPORT_FILE_PATH: ${{ env.REPORT_FILE_PATH }}
+
+      # ──────────────────────────────────────────────────────────────────────
+      # 7) PRE‑CREATE the folders so 'allure-combine' never complains
+      - name: Prepare Allure folders
         run: |
-          pip install pandas openpyxl allure-combine
+          mkdir -p allure-report
+          mkdir -p allure-history
 
-      - name: Install Java (Allure dependency)
-        run: sudo apt-get install -y openjdk-17-jre
+      # 8) Grab last run’s history (first run will continue if none)
+      - name: Download previous Allure history
+        uses: actions/download-artifact@v3
+        with:
+          name: allure-history
+          path: allure-history
+          fail-on-missing: false
 
-      - name: Install Allure CLI
-        run: |
-          wget https://github.com/allure-framework/allure2/releases/download/2.27.0/allure-2.27.0.tgz
-          tar -zxvf allure-2.27.0.tgz
-          sudo mv allure-2.27.0 /opt/allure
-          sudo ln -s /opt/allure/bin/allure /usr/bin/allure
+      # 9) Generate the HTML report + merge history
+      - name: Generate Allure HTML Report
+        uses: simple-elf/allure-report-action@v1.8
+        with:
+          allure_results: allure-results
+          allure_report: allure-report
+          allure_history: allure-history
+          keep_reports: 20
 
-      - name: Generate Allure results
-        run: |
-          python .github/scripts/generate_allure_results.py "${{ env.REPORT_FILE_PATH }}"
-
-      - name: Generate Portable Allure Report
-        run: |
-          allure generate allure-results -o allure-report --clean
-          allure-combine allure-report --dest combined-report
-          mv combined-report/complete.html combined-report/owasp-scan-report.html
-
-      - name: Upload Portable Report
+      # 10) Upload new report + updated history as artifacts
+      - name: Upload Allure HTML
         uses: actions/upload-artifact@v4
         with:
-          name: Portable-Allure-Report
-          path: combined-report/owasp-scan-report.html
+          name: Allure-HTML-Report
+          path: allure-report/
 
       - name: Upload Allure History
         uses: actions/upload-artifact@v4
         with:
           name: allure-history
-          path: allure-report/history
+          path: allure-history/
+
+      # 11) Deploy static site into `reports` branch (for jsDelivr/raw.githack)
+      - name: Deploy Allure to ‘reports’ branch
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git checkout --orphan reports
+          git rm -rf .
+          cp -r allure-report/* .
+          git add .
+          git commit -m "Deploy Allure report – run ${{ github.run_number }}"
+          git push -f origin reports
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
